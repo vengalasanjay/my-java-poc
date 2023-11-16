@@ -1,22 +1,99 @@
-# Maven
-# Build your Java project and run tests with Apache Maven.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/java
+pr: none
+trigger: none
 
-trigger:
-- main
+resources:
+  webhooks:
+    - webhook: prpushtoreleasebranch
+      connection: prWebhookFromBitbucket
+
+variables:
+- group: algVariableGroup
 
 pool:
   vmImage: ubuntu-latest
 
 steps:
-- task: Maven@3
-  inputs:
-    mavenPomFile: 'pom.xml'
-    mavenOptions: '-Xmx3072m'
-    javaHomeOption: 'JDKVersion'
-    jdkVersionOption: '1.8'
-    jdkArchitectureOption: 'x64'
-    publishJUnitResults: true
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
-    goals: 'package'
+- script: |
+        echo "PR-Title is ${{ parameters.prpushtoreleasebranch.push.changes[0].new.target.message }}"
+        echo "commitid from pr is ${{ parameters.prpushtoreleasebranch.push.changes[0].new.target.hash }}"
+        echo "repositoryname from pr is ${{ parameters.prpushtoreleasebranch.repository.full_name }}"
+        echo "repository from pr is ${{ parameters.prpushtoreleasebranch.repository.name }}"
+        prTitle="${{ parameters.prpushtoreleasebranch.push.changes[0].new.target.message }}"
+        targetCommitId="${{ parameters.prpushtoreleasebranch.push.changes[0].new.target.hash }}"
+        targetRepoName="${{ parameters.prpushtoreleasebranch.repository.full_name }}"
+        targetRepo=`echo $targetRepoName | cut -d "/" -f2`
+        triggeredBranch="${{ parameters.prpushtoreleasebranch.push.changes[0].new.name }}"
+        requiredBranchRegExpr="release*"
+        echo "Repo Full Name is $targetRepoName"
+        echo "Repo Name is $targetRepo"
+        echo "triggeredBranch is $triggeredBranch"
+        echo "requiredBranchRegExpr is $requiredBranchRegExpr"
+        echo "prTitle is $prTitle"
+        echo "##vso[task.setvariable variable=targetCommitId]$targetCommitId"
+        echo "##vso[task.setvariable variable=targetRepoName]$targetRepoName"
+        echo "##vso[task.setvariable variable=prTitle]$prTitle"
+        if [[ $triggeredBranch =~ $requiredBranchRegExpr ]]; 
+        then
+            set -x
+            developBranchName=develop
+            echo "developBranchName is $developBranchName"
+            git config --global user.email "anand.gundapureddy@motivitylabs.com"
+            git config --global user.name "Anand Sanjay Reddy Gundapureddy"
+            git clone https://$(bitbucketappusername):$(bitbucketapppassword)@bitbucket.org/$targetRepoName.git
+            cd "$targetRepo"
+            git checkout $developBranchName
+            git pull
+            git branch
+            if git cherry-pick -m 1 $targetCommitId --allow-empty;
+            then
+                cherrypicstatus=success
+            else
+                cherrypicstatus=failed
+                curl --request POST --header "Content-Type: application/json" 'https://corpusmobilelabs.webhook.office.com/webhookb2/319d3a47-46b0-40aa-abce-78662d9ca258@0491905f-824c-45f5-8e9e-d23c8c5d89d5/IncomingWebhook/41cbba439d3a45babe01d4733ee64038/0b737e71-b46a-49fd-9a8a-209999c70bf9'  -d '{
+                  "@type": "MessageCard",  
+                  "@context": "http://schema.org/extensions",  
+                  "themeColor": "0076D7",  
+                  "summary": "Rolling Workflow started",  
+                  "sections": [{  
+                      "activityTitle": "Commit-ID: ${{ parameters.prpushtoreleasebranch.push.changes[0].commits[0].hash }} in ${{ parameters.prpushtoreleasebranch.repository.full_name }} - autocascade failed information",
+                      "activitySubtitle": "${{ parameters.prpushtoreleasebranch.push.changes[0].commits[0].message }} - Autocascade Failed",  
+                      "activityImage": "",  
+                      "facts": [{  
+                          "name": "PR Title",  
+                          "value": "${{ parameters.prpushtoreleasebranch.push.changes[0].commits[0].message }}"  
+                      },  
+                      {  
+                          "name": "Repository",  
+                          "value": "${{ parameters.prpushtoreleasebranch.repository.full_name }}"  
+                      },  
+                      {  
+                          "name": "Commit ID",  
+                          "value": "${{ parameters.prpushtoreleasebranch.push.changes[0].commits[0].hash }}"  
+                      },  
+                      {  
+                          "name": "Committed By",  
+                          "value": "${{ parameters.prpushtoreleasebranch.push.changes[0].commits[0].author.user.display_name }}"  
+                      },
+                      {  
+                          "name": "Source Branch",  
+                          "value": "${{ parameters.prpushtoreleasebranch.push.changes[0].new.name }}"  
+                      },
+                      {  
+                          "name": "Targeted Branch",  
+                          "value": "refs/heads/develop"  
+                      },
+                      {
+                          "name": "URL",  
+                          "value": "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"  
+                      }],  
+                      "markdown": true  
+                      }]
+              }'
+            fi
+            echo "$cherrypicstatus"
+            git status
+            git push
+        else
+            echo "this execution is not triggered for release branch"
+        fi
+        echo $cherrypicstatus
