@@ -1,10 +1,1 @@
-trigger:
-  branches:
-    include:
-      - Testing
 
-steps:
-- script: |
-    echo "Source Branch: $(Build.SourceBranch)"
-    echo "Commit ID: $(Build.SourceVersion)"
-  displayName: 'Display Commit and Branch Information'
